@@ -1,0 +1,745 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: This template creates an insecure web app for NextWork's project on threat detection and GuardDuty! 
+Metadata:
+  Version: "1.0"
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Setup: leave as defaults unless you know what you are doing"
+        Parameters:
+          - TheAmi
+          - TheVpcRange
+          - TheSubnetRange
+          - TheOtherSubnetRange
+          - TheWebPort
+    ParameterLabels:
+      TheAmi:
+        default: Ubuntu 20.04 AMI
+      TheVpcRange:
+        default: VPC CIDR range
+      TheSubnetRange:
+        default: subnet CIDR range
+      TheOtherSubnetRange:
+        default: another subnet CIDR range
+      TheWebPort:
+        default: port application is listening at
+
+Mappings:
+  RegionMap:
+    "ap-northeast-1":
+      CloudFrontPrefixList: pl-58a04531
+    "ap-northeast-2":
+      CloudFrontPrefixList: pl-22a6434b
+    "ap-south-1":
+      CloudFrontPrefixList: pl-9aa247f3
+    "ap-southeast-1":
+      CloudFrontPrefixList: pl-31a34658
+    "ap-southeast-2":
+      CloudFrontPrefixList: pl-b8a742d1
+    "ca-central-1":
+      CloudFrontPrefixList: pl-38a64351
+    "eu-central-1":
+      CloudFrontPrefixList: pl-a3a144ca
+    "eu-north-1":
+      CloudFrontPrefixList: pl-fab65393
+    "eu-west-1":
+      CloudFrontPrefixList: pl-4fa04526
+    "eu-west-2":
+      CloudFrontPrefixList: pl-93a247fa
+    "eu-west-3":
+      CloudFrontPrefixList: pl-75b1541c
+    "sa-east-1":
+      CloudFrontPrefixList: pl-5da64334
+    "us-east-1":
+      CloudFrontPrefixList: pl-3b927c52
+    "us-east-2":
+      CloudFrontPrefixList: pl-b6a144df
+    "us-west-1":
+      CloudFrontPrefixList: pl-4ea04527
+    "us-west-2":
+      CloudFrontPrefixList: pl-82a045eb
+
+
+Parameters:
+  TheAmi:
+    Description: Ubuntu 20.04 AMI
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+  TheVpcRange:
+    Description: VPC CIDR range
+    Default: 10.0.3.0/26
+    Type: String
+  TheSubnetRange:
+    Description: subnet CIDR range
+    Default: 10.0.3.16/28
+    Type: String
+  TheOtherSubnetRange:
+    Description: another subnet CIDR range
+    Default: 10.0.3.32/28
+    Type: String
+  TheWebPort:
+    Description: port application is listening at
+    Default: 80
+    Type: Number
+
+Resources:
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W10
+            reason: "Ignore access logging"
+          - id: W70
+            reason: "Ignore minimal protocol"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: NextWork GuardDuty project CloudFront Distribution
+      DistributionConfig:
+        Comment: NextWork GuardDuty project CloudFront Distribution
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        DefaultCacheBehavior:
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3 # AllViewer
+          TargetOriginId: !Ref TheLoadBalancer
+          ViewerProtocolPolicy: allow-all
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - PATCH
+            - POST
+            - DELETE
+        DefaultRootObject: index.html
+        Enabled: true
+        Origins:
+          - DomainName: !GetAtt TheLoadBalancer.DNSName
+            Id: !Ref TheLoadBalancer
+            CustomOriginConfig:
+              HTTPPort: !Ref TheWebPort
+              OriginProtocolPolicy: http-only
+        PriceClass: PriceClass_100
+
+  TheRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "ec2.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      Description: !Sub "Created by CloudFormation ${AWS::StackId}"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: InstancePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectAcl
+                  - s3:PutObjectAcl
+                  - s3:DeleteObject
+                Resource: !Sub ${TheSecureBucket.Arn}/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketPolicy
+                  - s3:GetEncryptionConfiguration
+                Resource: !GetAtt TheSecureBucket.Arn
+
+  TheInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref TheRole
+
+  TheLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W52
+            reason: "Ignore access logging"
+    Properties:
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref TheLoadBalancerAccessSecurityGroup
+      Subnets:
+        - !Ref TheSubnet
+        - !Ref TheOtherSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-ALB"
+      Type: application
+
+  TheListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W56
+            reason: "Ignore HTTPS"
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TheTargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref TheLoadBalancer
+      Port: !Ref TheWebPort
+      Protocol: HTTP
+
+  TheTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: WafDemoTargetGroup
+      Port: !Ref TheWebPort
+      Protocol: HTTP
+      VpcId: !Ref TheVpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-TargetGroup"
+      HealthCheckEnabled: true
+      HealthyThresholdCount: 3
+      HealthCheckIntervalSeconds: 10
+      UnhealthyThresholdCount: 10
+      HealthCheckPath: /
+      HealthCheckPort: !Ref TheWebPort
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      Matcher:
+        HttpCode: 200-299
+      TargetType: instance
+      Targets: []
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: "0"
+
+  TheAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      AutoScalingCreationPolicy:
+        MinSuccessfulInstancesPercent: 100
+      ResourceSignal:
+        Timeout: PT20M
+        Count: "1"
+    UpdatePolicy:
+      AutoScalingScheduledAction:
+        IgnoreUnmodifiedGroupSizeProperties: true
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 2
+        PauseTime: PT5M
+        WaitOnResourceSignals: true
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+    Properties:
+      Cooldown: 0 # seconds
+      DefaultInstanceWarmup: 10 # seconds
+      Tags:
+        - Key: Name
+          PropagateAtLaunch: true
+          Value: !Ref "AWS::StackName"
+      HealthCheckType: ELB
+      TargetGroupARNs:
+        - !Ref TheTargetGroup
+      VPCZoneIdentifier:
+        - !Ref TheSubnet
+        - !Ref TheOtherSubnet
+      AvailabilityZones:
+        - !Select [0, !GetAZs ""]
+        - !Select [1, !GetAZs ""]
+      LaunchTemplate:
+        LaunchTemplateId: !Ref TheLaunchTemplate
+        Version: !GetAtt TheLaunchTemplate.LatestVersionNumber
+      DesiredCapacity: 1
+      MinSize: 1
+      MaxSize: 2
+
+  TheLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          default:
+            - CfnHupInstall
+        CfnHupInstall:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackName}
+                region=${AWS::Region}
+                interval=1
+                verbose=true
+              mode: "000400"
+              owner: "root"
+              group: "root"
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.TheLaunchTemplate.Metadata
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource TheLaunchTemplate --configsets default --region ${AWS::Region}
+                runas=root
+              mode: "000400"
+              owner: "root"
+              group: "root"
+            /etc/systemd/system/cfn-hup.service:
+              content: |
+                [Unit]
+                Description=Cloud formation helper daemon
+                [Service]
+                ExecStart=/opt/aws/bin/cfn-hup
+                Restart=always
+                Type=simple
+                [Install]
+                WantedBy=multi-user.target
+            /etc/systemd/system/juiceshop-service.service:
+              content: |
+                [Unit]
+                Description=Juice Shop Node JS Server Service
+                [Service]
+                User=juicer
+                WorkingDirectory=/juice-shop
+                ExecStart=/usr/bin/npm start
+                Restart=always
+                [Install]
+                WantedBy=multi-user.target
+            /etc/nginx/sites-available/default:
+              content: |
+                server {
+                  listen       80;
+                  server_name  localhost;
+                  location / {
+                    proxy_pass http://localhost:3000;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Host $host;
+                    proxy_cache_bypass $http_upgrade;
+                  }
+                }
+          commands:
+            01-install-cfn-hup:
+              command: |
+                set -xe
+                systemctl enable cfn-hup.service
+                systemctl start cfn-hup.service
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              DeleteOnTermination: true
+              VolumeSize: 20 # GB
+              VolumeType: gp3
+        IamInstanceProfile:
+          Arn: !GetAtt TheInstanceProfile.Arn
+        ImageId: !Ref TheAmi
+        InstanceInitiatedShutdownBehavior: terminate
+        InstanceType: "t2.micro"
+        NetworkInterfaces:
+          - DeleteOnTermination: true
+            AssociatePublicIpAddress: true
+            DeviceIndex: 0
+            Groups:
+              - !Ref TheWebServerAccessSecurityGroup
+        UserData:
+          "Fn::Base64": !Sub |-
+            #!/bin/bash -xe
+
+            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+
+            # Update package repo, add NodeJS source
+            apt-get -y update
+            apt-get -y upgrade
+            apt-get -y purge unattended-upgrades
+            curl -sL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+            apt-get -y install curl dirmngr apt-transport-https lsb-release ca-certificates python-setuptools awscli nodejs gcc g++ make nginx
+
+            # Create users and groups
+            addgroup --system --gid 1033 juicer
+            adduser juicer --system --uid 1033 --ingroup juicer
+
+            # Call cfn-init script to install files and packages
+            mkdir -p /opt/aws/bin
+            cd /
+
+            wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+            python3 -m easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-py3-latest.tar.gz
+
+            # Store secret information in S3
+            echo "Dang it - if you can see this text, you're accessing our private information!" >/tmp/secret-information.txt
+            aws s3 cp /tmp/secret-information.txt s3://${TheSecureBucket}
+
+            # Install Nginx and configure to front Node
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource TheLaunchTemplate --configsets default --region ${AWS::Region}
+
+            # Download juice-shop, set permissions, and build
+            wget -q https://github.com/juice-shop/juice-shop/releases/download/v13.3.0/juice-shop-13.3.0_node16_linux_x64.tgz
+            tar -xzf juice-shop-13.3.0_node16_linux_x64.tgz
+            mv juice-shop_13.3.0 juice-shop
+            cd /juice-shop
+            chown -R juicer .
+            mkdir logs
+            chown -R juicer logs
+            chgrp -R 0 ftp/ frontend/dist/ logs/ data/ i18n/
+            chmod -R g=u ftp/ frontend/dist/ logs/ data/ i18n/
+
+            systemctl daemon-reload
+            systemctl restart juiceshop-service
+            systemctl restart nginx
+
+            # Call cfn-signal script to send a signal with exit code
+            /opt/aws/bin/cfn-signal --exit-code $? --stack ${AWS::StackName} --resource TheAutoScalingGroup --region ${AWS::Region}
+
+  TheVpc:
+    Type: AWS::EC2::VPC
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W60
+            reason: "Ignore VPC flow logs"
+    Properties:
+      CidrBlock: !Ref TheVpcRange
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-VPC"
+
+  TheSubnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: TheInternetVpcAssociation
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Ref TheSubnetRange
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-SUBNET"
+      VpcId: !Ref TheVpc
+
+  TheOtherSubnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: TheInternetVpcAssociation
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Ref TheOtherSubnetRange
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-OTHERSUBNET"
+      VpcId: !Ref TheVpc
+
+  TheRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref TheVpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-RouteTable"
+
+  TheSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref TheRouteTable
+      SubnetId: !Ref TheSubnet
+
+  TheOtherSubnetRouteTableAssociation:
+    DependsOn: TheSubnet
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref TheRouteTable
+      SubnetId: !Ref TheOtherSubnet
+
+  TheGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-InternetGateway"
+
+  TheInternetVpcAssociation:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref TheGateway
+      VpcId: !Ref TheVpc
+
+  TheRoute:
+    Type: AWS::EC2::Route
+    DependsOn: TheInternetVpcAssociation
+    Properties:
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref TheGateway
+      RouteTableId: !Ref TheRouteTable
+
+  TheWebServerAccessSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: "Ignore anywhere egress"
+          - id: W40
+            reason: "Ignore anywhere egress"
+    Properties:
+      GroupDescription: Web Server Group
+      VpcId: !Ref TheVpc
+      SecurityGroupIngress:
+        - Description: !Sub "Allow ${TheWebPort}/tcp from Load Balancer"
+          IpProtocol: tcp
+          FromPort: !Ref TheWebPort
+          ToPort: !Ref TheWebPort
+          SourceSecurityGroupId: !Ref TheLoadBalancerAccessSecurityGroup
+      SecurityGroupEgress:
+        - Description: Allow access to anywhere
+          IpProtocol: "-1"
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-TheWebServerAccessSecurityGroup"
+
+  TheLoadBalancerAccessSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: "Ignore anywhere egress"
+          - id: W40
+            reason: "Ignore anywhere egress"
+    Properties:
+      GroupDescription: Load Balancer Group
+      VpcId: !Ref TheVpc
+      SecurityGroupIngress:
+        - Description: !Sub "Allow ${TheWebPort}/tcp from CloudFront"
+          IpProtocol: tcp
+          FromPort: !Ref TheWebPort
+          ToPort: !Ref TheWebPort
+          SourcePrefixListId: !FindInMap ["RegionMap", !Ref "AWS::Region", "CloudFrontPrefixList"]
+      SecurityGroupEgress:
+        - Description: Allow access to anywhere
+          IpProtocol: "-1"
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-TheLoadBalancerAccessSecurityGroup"
+
+  TheSecureBucket:
+    Type: "AWS::S3::Bucket"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: "Ignore access logging"
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  TheSecureBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref TheSecureBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt TheSecureBucket.Arn
+              - !Sub "${TheSecureBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+  TheS3Endpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+              - s3:GetBucketPolicy
+              - s3:GetObjectAcl
+              - s3:PutObjectAcl
+              - s3:DeleteObject
+            Resource:
+              - !GetAtt TheSecureBucket.Arn
+              - !Sub "${TheSecureBucket.Arn}/*"
+              - !Sub "arn:${AWS::Partition}:s3:::cloudformation-examples"
+              - !Sub "arn:${AWS::Partition}:s3:::cloudformation-examples/*"
+      RouteTableIds:
+        - !Ref TheRouteTable
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcId: !Ref TheVpc
+
+  EventBridgeRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "events.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+      Description: !Sub "DO NOT DELETE - Used by EventBridge. Created by CloudFormation ${AWS::StackId}"
+      Policies:
+        - PolicyName: EventBridgePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "states:StartExecution"
+                Resource: !Ref StateMachine
+
+  RemediationRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: GuardDuty EC2 Credential Remediation Rule
+      EventPattern:
+        source:
+          - aws.guardduty
+          - security.workshop
+        detail-type:
+          - GuardDuty Finding
+        detail:
+          type:
+            - UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS
+            - UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.InsideAWS
+      State: ENABLED
+      Targets:
+        - Arn: !Ref StateMachine
+          Id: stepfunction-remediation
+          InputTransformer:
+            InputPathsMap:
+              role_name: "$.detail.resource.accessKeyDetails.userName"
+              timestamp: "$.detail.service.eventLastSeen"
+            InputTemplate: |-
+              {
+                "RoleName": "<role_name>",
+                "PolicyDocument": {
+                  "Version": "2012-10-17",
+                  "Statement": {
+                    "Effect": "Deny",
+                    "Action": "*",
+                    "Resource": "*",
+                    "Condition": {
+                      "DateLessThan": {
+                        "aws:TokenIssueTime": "<timestamp>"
+                      }
+                    }
+                  }
+                }
+              }
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  StateMachineRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "states.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+            Condition:
+              ArnLike:
+                "aws:SourceArn": !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*"
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+      Description: !Sub "DO NOT DELETE - Used by Step Functions. Created by CloudFormation ${AWS::StackId}"
+      Policies:
+        - PolicyName: StateMachinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "iam:PutRolePolicy"
+                Resource: !GetAtt TheRole.Arn
+
+  StateMachine:
+    Type: "AWS::StepFunctions::StateMachine"
+    Properties:
+      Definition:
+        StartAt: RevokeOldSessions
+        States:
+          RevokeOldSessions:
+            Type: Task
+            Parameters:
+              "PolicyDocument.$": "$.PolicyDocument"
+              PolicyName: RevokeOldSessions
+              "RoleName.$": "$.RoleName"
+            Resource: "arn:aws:states:::aws-sdk:iam:putRolePolicy"
+            End: true
+      RoleArn: !GetAtt StateMachineRole.Arn
+
+  Detector:
+    Type: "AWS::GuardDuty::Detector"
+    Properties:
+      Enable: true
+      Features:
+        - Name: S3_DATA_EVENTS
+          Status: ENABLED
+        - Name: EKS_AUDIT_LOGS
+          Status: ENABLED
+        - Name: EBS_MALWARE_PROTECTION
+          Status: ENABLED
+        - Name: RDS_LOGIN_EVENTS
+          Status: ENABLED
+        - AdditionalConfiguration:
+            - Name: EKS_ADDON_MANAGEMENT
+              Status: ENABLED
+          Name: EKS_RUNTIME_MONITORING
+          Status: ENABLED
+        - Name: LAMBDA_NETWORK_LOGS
+          Status: ENABLED
+      FindingPublishingFrequency: FIFTEEN_MINUTES
+
+Outputs:
+  JuiceShopURL:
+    Description: The public URL of the Juice Shop application
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+
+  S3VpcEndpointId:
+    Description: The S3 VPC Endpoint that was created
+    Value: !Ref TheS3Endpoint
+
+  TheSecureBucket:
+    Description: The S3 bucket that was created
+    Value: !Ref TheSecureBucket
+
+  TheRoleArn:
+    Description: The EC2 instance IAM role
+    Value: !GetAtt TheRole.Arn
