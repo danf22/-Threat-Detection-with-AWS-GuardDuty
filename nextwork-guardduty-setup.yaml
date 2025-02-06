@@ -147,6 +147,7 @@ Resources:
                   - s3:GetObjectAcl
                   - s3:PutObjectAcl
                   - s3:DeleteObject
+                  - s3:ListBucket
                 Resource: !Sub ${TheSecureBucket.Arn}/*
               - Effect: Allow
                 Action:
