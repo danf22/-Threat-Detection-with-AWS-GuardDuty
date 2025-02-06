@@ -2,93 +2,59 @@
 <img width="924" alt="architecture-complete (5)" src="https://github.com/user-attachments/assets/fb589ba6-0d48-45fb-bd2e-d8de638e62e6" />
 
 # -Threat-Detection-with-AWS-GuardDuty
-That’s the idea behind the Threat Detection with GuardDuty project. It’s a hands-on exercise where I deploy a vulnerable web application, attack it, and then use Amazon GuardDuty to detect those attacks. The goal is to give me a practical understanding of threat detection.
-If I want to learn how to detect threats in a cloud environment, the best way is to simulate them myself. That’s the idea behind the Threat Detection with GuardDuty project. It’s a hands-on exercise where I deploy a vulnerable web application, attack it, and then use Amazon GuardDuty to detect those attacks. The goal is to give me a practical understanding of threat detection.
+Esa es la idea detrás del proyecto Detección de amenazas con GuardDuty. Es un ejercicio práctico donde despliego una aplicación web vulnerable, la ataco y luego uso Amazon GuardDuty para detectar esos ataques. El objetivo es obtener una comprensión práctica de la detección de amenazas. Si quiero aprender a detectar amenazas en un entorno en la nube, la mejor manera es simularlas yo mismo.
 
-Working with a vulnerable web application is one way to learn about security threats. There’s a project involving an app called OWASP Juice Shop, which contains multiple flaws. The idea is to deploy it in AWS and then see how Amazon GuardDuty detects suspicious actions when it gets attacked.
+Trabajar con una aplicación web vulnerable es una forma efectiva de aprender sobre amenazas de seguridad. Hay un proyecto que involucra una aplicación llamada OWASP Juice Shop, que contiene múltiples vulnerabilidades. La idea es desplegarla en AWS y luego observar cómo Amazon GuardDuty detecta acciones sospechosas cuando se realizan ataques.
 
-KEY CONCEPTS
-
+Conceptos clave
 Amazon GuardDuty
 Amazon CloudFront
 Amazon S3
 AWS CloudFormation
 OWASP Juice Shop
-I started by using an AWS CloudFormation template. The template builds the underlying pieces:
+Comencé utilizando una plantilla de AWS CloudFormation. La plantilla crea automáticamente los componentes subyacentes:
 
-• A Virtual Private Cloud for the environment
-• Subnets and security groups for traffic control
-• An EC2 instance hosting the Juice Shop
-• An S3 bucket for data
-• GuardDuty for continuous threat detection
+Una VPC para el entorno
+Subredes y grupos de seguridad para el control del tráfico
+Una instancia EC2 que aloja Juice Shop
+Un bucket de S3 para almacenar datos
+GuardDuty para la detección continua de amenazas
+CloudFormation ayuda a evitar la configuración manual. Se puede revisar la plantilla para ver todos los recursos que AWS creará.
 
-CloudFormation helps skip manual work. You can review the template to see every resource AWS will create.
+Principales ideas del proyecto
+Aprender haciendo
 
-The project revolves around a few key ideas:
+La mejor manera de entender la ciberseguridad es practicarla. En este proyecto, actúo como atacante y defensor. Explotar vulnerabilidades en un entorno controlado y luego analizar cómo se detectan esas amenazas proporciona una perspectiva invaluable.
 
-Learning by Doing
-The best way to understand cybersecurity is to practice it. In this project, I play both the attacker and the defender. I exploit vulnerabilities in a controlled environment and then analyze how those exploits are detected. This dual perspective is invaluable.
-Using a Vulnerable Web Application
-The project uses OWASP Juice Shop, a deliberately vulnerable web application. It’s designed to have security flaws so I can practice exploiting them without causing real harm. I deploy it using AWS CloudFormation, which automates the setup of the infrastructure.
-Simulating Common Attacks
-I simulate three types of attacks:
-SQL Injection: Bypassing login authentication by injecting malicious SQL code.
-Command Injection: Executing malicious commands on the web server.
-Data Exfiltration: Stealing sensitive data from an S3 bucket.
-Analyzing Results with GuardDuty
-Amazon GuardDuty is a machine learning-powered service that monitors my AWS environment for suspicious activity. After simulating the attacks, I use GuardDuty to detect them. The service provides detailed findings, including what happened, when it happened, and which resources were affected.
+Uso de una aplicación web vulnerable
 
-When the Juice Shop is up, there’s a login page with a standard email and password prompt. SQL injection is the first trick. You enter something like ' or 1=1;-- in the password field to bypass authentication. The approach is to break the query's logic so the server treats every login attempt as valid. It's a classic attack from older web apps, though it still appears in production environments.
+El proyecto utiliza OWASP Juice Shop, una aplicación web creada con vulnerabilidades intencionales. Está diseñada para que los profesionales de seguridad puedan practicar la explotación de fallos sin causar daño real. Se despliega con AWS CloudFormation, que automatiza la configuración de la infraestructura.
 
-Then there’s a command injection. You place malicious instructions in the username field and rely on the server to run them. In this project, those instructions force the system to store temporary AWS credentials in a public JSON file. It reveals a gap in the app’s input handling. When code from user input runs on the server, it opens a door to every resource the instance can reach.
+Simulación de ataques comunes
 
-Next, I switched to AWS CloudShell, which is a managed environment for running AWS CLI commands. I took the stolen credentials and turned them into a new CLI profile. Then I used the profile to copy an S3 object called secret-information.txt. The file had a short message signaling the attack was successful.
+Se simulan tres tipos de ataques:
 
-At this point, it’s useful to see how GuardDuty reacts. GuardDuty monitors the environment, so when it notices a suspicious event, it reports a finding. In this case, it flagged abnormal S3 activity within 15 minutes. The summary explained which role had been compromised and which API actions had been used. It’s the detail you need if you plan to track the source of an incident.
+Inyección SQL: Omitiendo la autenticación mediante código SQL malicioso.
+Inyección de comandos: Ejecutando comandos maliciosos en el servidor web.
+Exfiltración de datos: Robando información confidencial de un bucket de S3.
+Análisis de resultados con GuardDuty
+Amazon GuardDuty es un servicio basado en machine learning que supervisa el entorno AWS en busca de actividades sospechosas. Después de simular los ataques, uso GuardDuty para detectarlos. El servicio proporciona hallazgos detallados, como qué ocurrió, cuándo y qué recursos se vieron afectados.
 
-Enabling malware protection in GuardDuty is an extra step. You can upload an EICAR test file to see if GuardDuty responds. EICAR is a synthetic piece of malware, so it doesn’t break anything. GuardDuty detects it and logs a new finding.
+Ejemplo de ataques y detección
 
-It’s important to clean up after a test. I removed the CloudFormation stack, deleted the credentials file, and confirmed the environment was gone. It’s easy to leave a system exposed if you don’t tidy up.
+Inyección SQL
+La aplicación tiene una página de inicio de sesión con un campo de correo electrónico y contraseña.
+Se usa una consulta maliciosa como: ' OR 1=1;-- en el campo de contraseña para omitir la autenticación.
+Esto manipula la lógica de la consulta y permite acceso no autorizado.
+Inyección de comandos
+Se ingresan comandos maliciosos en el campo de nombre de usuario.
+Estos comandos fuerzan al sistema a almacenar credenciales temporales de AWS en un archivo JSON público.
+Esto revela una vulnerabilidad en la validación de entrada de la aplicación.
+Exfiltración de datos
+Se usan las credenciales robadas para crear un perfil en la CLI de AWS.
+Luego, se copia un archivo "secret-information.txt" de un bucket de S3.
+Esto confirma que el atacante puede acceder y extraer datos sensibles.
+¿Cómo responde GuardDuty?
+GuardDuty supervisa el entorno en tiempo real y reporta eventos sospechosos en aproximadamente 15 minutos. En este caso, marcó la actividad inusual en S3, mostrando qué rol fue comprometido y qué acciones de API se ejecutaron.
 
-Projects like this highlight the link between poor input validation and data breaches. The moment an app processes unfiltered data, it invites attackers to poke around. An attacker does not need advanced skills to run an injection. A few lines of text can bypass a login or exfiltrate secrets.
-
-GuardDuty is an example of how machine learning can assist with defense. It parses logs and traffic patterns, looking for anything suspicious. It won’t stop every threat, but it can catch major red flags. The best approach is to combine tight coding, robust IAM policies, and a service like GuardDuty to watch for anomalies.
-
-I recommend starting with a test environment. You can learn AWS tools, see how a live attack unfolds, and figure out how a defender responds. This cycle of build-break-fix is the core of cybersecurity. It’s not about theoretical examples. It’s about real workloads, real logs, and real alerts.
-
-Bullet Points to Remember:
-
-• Look for systems which are safe to hack, like Juice Shop
-• Deploy them with infrastructure-as-code, so you control every piece
-• Attack them and note every step which leads to a compromise
-• Watch for how GuardDuty responds and see if it catches the intrusion
-• Avoid leaving any traces after you’re done
-
-This kind of practice builds an intuitive sense of risk. You see the difference between a random scan and a targeted approach. You see how data can vanish if an attacker grabs credentials. You see how a single open door can lead to a bigger breach.
-
-There’s a lot to keep learning in AWS security. It’s not enough to enable a single service and walk away. You need constant testing, constant updates, and constant exploration of new threat vectors. But a structured project with a tool like Juice Shop is a good place to begin. Once you’ve seen what an attacker does, it’s much easier to defend.
-
-Further Reading::
-🤖ChatGPT for Vulnerability Detection by Tahir Balarabe
-
-What are AI Agents?
-
-Stable Diffusion Deepfakes: Creation and Detection
-
-The Difference Between AI Assistants and AI Agents (And Why It Matters)
-
-☁️ Building Scalable Three-Tier Web Apps with AWS
-
-🐳Deploying a Backend Application with Kubernetes on AWS EKS
-
-Encrypt Data with AWS Key Management Service KMS
-
-Automating S3 Buckets with Terraform🏗️
-
-Mastering Database on AWS: From QuickSight to DynamoDB
-
-Creating and Deploying a Containerized Application with Docker and AWS Elastic Beanstalk
-
-How to Secure Your Cloud with AWS IAM Policies
-
-MY JOURNEY ON AWS(AMAZON WEB SERVICES)
+Otra prueba interesante es la protección contra malware de GuardDuty. Para probarla, se puede subir un archivo EICAR, que es un malware de prueba inofensivo. GuardDuty lo detecta inmediatamente y registra un nuevo hallazgo.
