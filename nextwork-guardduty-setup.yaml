@@ -154,7 +154,7 @@ Resources:
                   - s3:GetBucketPolicy
                   - s3:GetEncryptionConfiguration
                   - s3:ListAllMyBuckets
-                Resource: !GetAtt TheSecureBucket.Arn
+                Resource: "*"
 
   TheInstanceProfile:
     Type: AWS::IAM::InstanceProfile
