@@ -13,6 +13,9 @@ Este proyecto tiene como objetivo proporcionar una comprensión práctica de la 
 - **AWS CloudFormation**
 - **OWASP Juice Shop**
 
+
+## Diagrama del Proyecto
+<img width="924" alt="architectura (5)" src="https://github.com/danf22/-Threat-Detection-with-AWS-GuardDuty/blob/main/Diagram.png" />
 ## Objetivos del proyecto
 
 El proyecto tiene como objetivo proporcionar una comprensión práctica sobre la seguridad en la nube y la detección de amenazas mediante los siguientes pasos:
